@@ -114,10 +114,12 @@ export interface RequestFilteringAgentOptions {
     // Default: false
     allowMetaIPAddress?: boolean;
     // Allow address list
-    // This values are preferred than denyAddressList
+    // Supports both individual IP addresses and CIDR notation (e.g., "192.168.1.0/24", "10.0.0.0/8")
+    // These values are preferred than denyAddressList
     // Default: []
     allowIPAddressList?: string[];
     // Deny address list
+    // Supports both individual IP addresses and CIDR notation (e.g., "172.16.0.0/12", "2001:db8::/32")
     // Default: []
     denyIPAddressList?: string[];
 }
@@ -162,6 +164,38 @@ fetch(url, {
     agent: agent
 }).then(res => {
     console.log(res); // OK
+});
+```
+
+### Example: Using CIDR Notation
+
+You can now use CIDR notation to allow or deny entire network ranges:
+
+```js
+const fetch = require("node-fetch");
+const { RequestFilteringHttpAgent } = require("request-filtering-agent");
+
+// Allow all addresses in the 192.168.1.0/24 subnet and the entire 10.0.0.0/8 range
+const agent = new RequestFilteringHttpAgent({
+    allowIPAddressList: [
+        "192.168.1.0/24",    // Allow 192.168.1.1 to 192.168.1.254
+        "10.0.0.0/8",        // Allow 10.0.0.1 to 10.255.255.254
+        "127.0.0.1"          // Also allow localhost (exact IP match)
+    ],
+    allowPrivateIPAddress: false,
+});
+
+// This will work - 192.168.1.50 is in the 192.168.1.0/24 range
+fetch('http://192.168.1.50:8080/', { agent });
+
+// You can also use CIDR notation in deny lists
+const denyAgent = new RequestFilteringHttpAgent({
+    allowPrivateIPAddress: true,     // Allow private IPs in general
+    denyIPAddressList: [
+        "192.168.1.0/24",           // But deny this specific subnet
+        "169.254.0.0/16",           // Deny link-local addresses  
+        "2001:db8::/32"             // Also works with IPv6 CIDR
+    ]
 });
 ```
 
