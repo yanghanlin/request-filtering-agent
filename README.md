@@ -114,10 +114,12 @@ export interface RequestFilteringAgentOptions {
     // Default: false
     allowMetaIPAddress?: boolean;
     // Allow address list
-    // This values are preferred than denyAddressList
+    // Supports both individual IP addresses and CIDR notation (e.g., "192.168.1.0/24", "10.0.0.0/8")
+    // These values are preferred than denyAddressList
     // Default: []
     allowIPAddressList?: string[];
     // Deny address list
+    // Supports both individual IP addresses and CIDR notation (e.g., "172.16.0.0/12", "2001:db8::/32")
     // Default: []
     denyIPAddressList?: string[];
 }
@@ -145,23 +147,39 @@ export declare const useAgent: (url: string, options?: https.AgentOptions & Requ
 
 ### Example: Create an Agent with options
 
-An agent that allow requesting `127.0.0.1`, but it disallows other Private IP.
+An agent that allow requesting specific IP addresses or CIDR ranges, but disallows other Private IPs.
 
 ```js
 const fetch = require("node-fetch");
 const { RequestFilteringHttpAgent } = require("request-filtering-agent");
 
-// Create http agent that allow 127.0.0.1, but it disallow other private ip
+// Create http agent with mixed individual IPs and CIDR notation
 const agent = new RequestFilteringHttpAgent({
-    allowIPAddressList: ["127.0.0.1"], // it is preferred than allowPrivateIPAddress option
+    allowIPAddressList: [
+        "127.0.0.1",         // Allow localhost (individual IP)
+        "192.168.1.0/24",    // Allow entire 192.168.1.x subnet (CIDR)
+        "10.0.0.0/8"         // Allow entire 10.x.x.x range (CIDR)
+    ],
     allowPrivateIPAddress: false, // Default: false
 });
-// 127.0.0.1 is private ip address, but it is allowed
-const url = 'http://127.0.0.1:8080/';
-fetch(url, {
-    agent: agent
-}).then(res => {
+
+// 127.0.0.1 is allowed (individual IP match)
+fetch('http://127.0.0.1:8080/', { agent }).then(res => {
     console.log(res); // OK
+});
+
+// 192.168.1.50 is allowed (matches 192.168.1.0/24 CIDR)
+fetch('http://192.168.1.50:8080/', { agent }).then(res => {
+    console.log(res); // OK
+});
+
+// You can also use CIDR notation in deny lists
+const denyAgent = new RequestFilteringHttpAgent({
+    allowPrivateIPAddress: true,     // Allow private IPs in general
+    denyIPAddressList: [
+        "169.254.0.0/16",           // But deny link-local addresses
+        "192.168.100.0/24"          // Deny specific subnet
+    ]
 });
 ```
 

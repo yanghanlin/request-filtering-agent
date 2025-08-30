@@ -35,6 +35,53 @@ export const DefaultRequestFilteringAgentOptions: Required<RequestFilteringAgent
     allowIPAddressList: [],
     denyIPAddressList: []
 };
+
+/**
+ * Check if an IP address matches any entry in a list that can contain individual IP addresses or CIDR blocks
+ * @param address IP address to check
+ * @param list Array of IP addresses or CIDR blocks (e.g., ['192.168.1.1', '10.0.0.0/8', '2001:db8::/32'])
+ * @returns true if the address matches any entry in the list
+ */
+const isIPInList = (address: string, list: string[]): boolean => {
+    if (list.length === 0) {
+        return false;
+    }
+
+    try {
+        const addr = ipaddr.process(address);
+
+        for (const entry of list) {
+            // Check if entry is a CIDR block (contains '/')
+            if (entry.includes("/")) {
+                try {
+                    const [cidrAddr, prefix] = ipaddr.parseCIDR(entry);
+                    if (addr.match([cidrAddr, prefix])) {
+                        return true;
+                    }
+                } catch (error) {
+                    // If CIDR parsing fails, skip this entry
+                    continue;
+                }
+            } else {
+                // Exact IP address match
+                try {
+                    const entryAddr = ipaddr.process(entry);
+                    if (addr.toString() === entryAddr.toString()) {
+                        return true;
+                    }
+                } catch (error) {
+                    // If IP parsing fails, skip this entry
+                    continue;
+                }
+            }
+        }
+
+        return false;
+    } catch (error) {
+        // If address parsing fails, return false
+        return false;
+    }
+};
 /**
  * validate the address that is matched the validation options
  * @param address ip address
@@ -54,7 +101,7 @@ const validateIPAddress = (
         const addr = ipaddr.parse(address);
         const range = addr.range();
         // prefer allowed list
-        if (options.allowIPAddressList.length > 0 && options.allowIPAddressList.includes(address)) {
+        if (options.allowIPAddressList.length > 0 && isIPInList(address, options.allowIPAddressList)) {
             return;
         }
         if (!options.allowMetaIPAddress) {
@@ -72,7 +119,7 @@ const validateIPAddress = (
             );
         }
 
-        if (options.denyIPAddressList.length > 0 && options.denyIPAddressList.includes(address)) {
+        if (options.denyIPAddressList.length > 0 && isIPInList(address, options.denyIPAddressList)) {
             return new Error(
                 `DNS lookup ${address}(family:${family}, host:${host}) is not allowed. Because It is defined in denyIPAddressList.`
             );

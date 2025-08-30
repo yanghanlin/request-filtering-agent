@@ -234,6 +234,172 @@ describe("request-filtering-agent", function () {
             }
         }
     });
+    it("should support CIDR notation in allowIPAddressList", async () => {
+        const agent = new RequestFilteringHttpAgent({
+            allowIPAddressList: ["127.0.0.0/8", "::1/128", "192.168.1.0/24"],
+            allowPrivateIPAddress: false
+        });
+
+        // Test IPv4 CIDR matching
+        const allowedIPs = [
+            `http://127.0.0.1:${TEST_PORT}`, // matches 127.0.0.0/8
+            `http://127.255.255.255:${TEST_PORT}`, // matches 127.0.0.0/8
+            `http://192.168.1.100:${TEST_PORT}` // matches 192.168.1.0/24
+        ];
+
+        for (const ipAddress of allowedIPs) {
+            try {
+                await fetch(ipAddress, {
+                    agent,
+                    timeout: 2000
+                });
+            } catch (error) {
+                assert.fail(new Error(`should allow ${ipAddress} because it matches CIDR, error: ${error}`));
+            }
+        }
+
+        // Test IPs that should be denied (not in CIDR ranges)
+        const deniedIPs = [`http://192.168.2.1:${TEST_PORT}`]; // doesn't match any CIDR
+        for (const ipAddress of deniedIPs) {
+            try {
+                await fetch(ipAddress, {
+                    agent,
+                    timeout: 2000
+                });
+                throw new ReferenceError("SHOULD NOT BE CALLED: " + ipAddress);
+            } catch (error) {
+                if (error instanceof ReferenceError) {
+                    assert.fail(error);
+                }
+                // Should be validation error for private IP
+                assert.match((error as Error).message, /It is private IP address/);
+            }
+        }
+    });
+
+    it("should support CIDR notation in denyIPAddressList", async () => {
+        const agent = new RequestFilteringHttpAgent({
+            allowPrivateIPAddress: true, // Allow private IPs in general
+            denyIPAddressList: ["192.168.1.0/24", "10.0.0.0/8"] // But deny specific CIDR ranges
+        });
+
+        const deniedIPs = [
+            `http://192.168.1.1:${TEST_PORT}`, // matches 192.168.1.0/24
+            `http://192.168.1.255:${TEST_PORT}`, // matches 192.168.1.0/24
+            `http://10.0.0.1:${TEST_PORT}`, // matches 10.0.0.0/8
+            `http://10.255.255.255:${TEST_PORT}` // matches 10.0.0.0/8
+        ];
+
+        for (const ipAddress of deniedIPs) {
+            try {
+                await fetch(ipAddress, {
+                    agent,
+                    timeout: 2000
+                });
+                throw new ReferenceError("SHOULD NOT BE CALLED: " + ipAddress);
+            } catch (error) {
+                if (error instanceof ReferenceError) {
+                    assert.fail(error);
+                }
+                // Should be validation error from deny list
+                assert.match((error as Error).message, /It is defined in denyIPAddressList/);
+            }
+        }
+
+        // Test IP that should be allowed (not in deny CIDR ranges)
+        const allowedIP = `http://172.16.0.1:${TEST_PORT}`;
+        try {
+            await fetch(allowedIP, {
+                agent,
+                timeout: 2000
+            });
+        } catch (error) {
+            assert.fail(new Error(`should allow ${allowedIP} because it's not in deny CIDR ranges`));
+        }
+    });
+
+    it("should support mixed individual IPs and CIDR notation", async () => {
+        const agent = new RequestFilteringHttpAgent({
+            allowIPAddressList: ["127.0.0.1", "192.168.1.0/24", "::1"], // Mix of individual and CIDR
+            allowPrivateIPAddress: false
+        });
+
+        const allowedIPs = [
+            `http://127.0.0.1:${TEST_PORT}`, // exact match
+            `http://192.168.1.50:${TEST_PORT}` // CIDR match
+        ];
+
+        for (const ipAddress of allowedIPs) {
+            try {
+                await fetch(ipAddress, {
+                    agent,
+                    timeout: 2000
+                });
+            } catch (error) {
+                assert.fail(new Error(`should allow ${ipAddress}, error: ${error}`));
+            }
+        }
+    });
+
+    (IS_IPV6_SUPPORTED ? it : it.skip)("should support IPv6 CIDR notation", async () => {
+        const agent = new RequestFilteringHttpAgent({
+            allowIPAddressList: ["2001:db8::/32"],
+            allowPrivateIPAddress: false
+        });
+
+        const allowedIPs = [
+            `http://[2001:db8::1]:${TEST_PORT}`, // matches 2001:db8::/32
+            `http://[2001:db8:ffff::1]:${TEST_PORT}` // matches 2001:db8::/32
+        ];
+
+        for (const ipAddress of allowedIPs) {
+            try {
+                await fetch(ipAddress, {
+                    agent,
+                    timeout: 2000
+                });
+            } catch (error) {
+                assert.fail(new Error(`should allow ${ipAddress} because it matches IPv6 CIDR, error: ${error}`));
+            }
+        }
+
+        // Test IPv6 that should be denied
+        const deniedIPs = [`http://[2001:db9::1]:${TEST_PORT}`]; // doesn't match CIDR
+        for (const ipAddress of deniedIPs) {
+            try {
+                await fetch(ipAddress, {
+                    agent,
+                    timeout: 2000
+                });
+                throw new ReferenceError("SHOULD NOT BE CALLED: " + ipAddress);
+            } catch (error) {
+                if (error instanceof ReferenceError) {
+                    assert.fail(error);
+                }
+                // Should be validation error for private IP
+                assert.match((error as Error).message, /It is private IP address/);
+            }
+        }
+    });
+
+    it("should handle invalid CIDR notation gracefully", async () => {
+        const agent = new RequestFilteringHttpAgent({
+            allowIPAddressList: ["invalid-cidr/24", "192.168.1.0/24"], // Mix of invalid and valid
+            allowPrivateIPAddress: false
+        });
+
+        // Valid CIDR should still work
+        const validIP = `http://192.168.1.10:${TEST_PORT}`;
+        try {
+            await fetch(validIP, {
+                agent,
+                timeout: 2000
+            });
+        } catch (error) {
+            assert.fail(new Error(`should allow ${validIP} because it matches valid CIDR`));
+        }
+    });
+
     it("should request public ip address", async () => {
         try {
             await fetch("http://example.com", {
